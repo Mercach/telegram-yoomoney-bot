@@ -57,8 +57,11 @@ def main():
 async def setup_webhook():
     await bot.delete_webhook()
     await bot.set_webhook(url=f"{RAILWAY_URL}/webhook/{BOT_TOKEN}")
+    print(f"Webhook установлен: {RAILWAY_URL}/webhook/{BOT_TOKEN}")
 
+# запускаем асинхронно
 asyncio.run(setup_webhook())
+
     print(f"Webhook установлен: {webhook_url}")
 
     port = int(os.getenv("PORT", 5000))
