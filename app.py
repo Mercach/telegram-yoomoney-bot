@@ -1,21 +1,23 @@
 import os
-import hmac
-import hashlib
 from flask import Flask, request
-from telegram import Bot, Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
-import threading
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")
-YOOMONEY_SECRET = os.getenv("YOOMONEY_SECRET")
+YOOMONEY_SECRET = os.getenv("YOOMONEY_SECRET")  # пока не используем, но пригодится для проверки платежей
+RAILWAY_URL = os.getenv("RAILWAY_URL")  # твой домен на Railway, например https://mybot.up.railway.app
 
-if not BOT_TOKEN or not YOOMONEY_WALLET or not YOOMONEY_SECRET:
-    raise ValueError("Не заданы переменные окружения: BOT_TOKEN, YOOMONEY_WALLET, YOOMONEY_SECRET")
+if not BOT_TOKEN:
+    raise ValueError("Не задан TELEGRAM_BOT_TOKEN")
 
 bot = Bot(BOT_TOKEN)
 app = Flask(__name__)
 
+application = Application.builder().token(BOT_TOKEN).updater(None).build()
+
+
+# Команда /buy
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     amount = 1
@@ -28,28 +30,35 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💳 Перейди по ссылке для оплаты:\n{pay_url}\n\nПосле подтверждения ЮMoney я сразу пришлю доступ ✅"
     )
 
-@app.route("/notify", methods=["POST"])
-def notify():
-    data = request.form.to_dict()
-    string = "&".join([f"{k}={data[k]}" for k in sorted(data.keys()) if k != "sha1_hash"])
-    signature = hmac.new(YOOMONEY_SECRET.encode(), string.encode(), hashlib.sha1).hexdigest()
-    if signature == data.get("sha1_hash"):
-        user_id = data.get("label")
-        if user_id:
-            bot.send_message(chat_id=user_id, text="✅ Оплата подтверждена! Вот твой доступ 🎉")
-        return "OK"
-    else:
-        return "Invalid signature", 400
 
-def start_bot():
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("buy", buy))
-    application.run_polling()
+# Регистрируем команду
+application.add_handler(CommandHandler("buy", buy))
+
+
+# Webhook endpoint (для Telegram)
+@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    application.update_queue.put_nowait(update)
+    return "OK", 200
+
+
+# Проверка, что сервер жив
+@app.route("/", methods=["GET"])
+def home():
+    return "Бот работает ✅", 200
+
 
 def main():
-    threading.Thread(target=start_bot, daemon=True).start()
+    # Устанавливаем webhook
+    webhook_url = f"{RAILWAY_URL}/webhook/{BOT_TOKEN}"
+    bot.delete_webhook()
+    bot.set_webhook(url=webhook_url)
+    print(f"Webhook установлен: {webhook_url}")
+
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 if __name__ == "__main__":
     main()
