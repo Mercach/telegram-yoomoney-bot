@@ -1,26 +1,24 @@
 import os
 from flask import Flask, request
-from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Берем токен из переменных окружения
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-bot = Bot(token=TOKEN)
 
+bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
-# Создаем диспетчер, он обработает команды
-dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
+# Создаем приложение (новый способ)
+application = ApplicationBuilder().token(TOKEN).build()
 
 # Команда /buy
-def buy(update, context):
+async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    update.message.reply_text(f"Привет, {update.effective_user.first_name}! Вы выбрали покупку.")
-    # Тут можно добавить логику оплаты или выдачи доступа
+    await update.message.reply_text(f"Привет, {update.effective_user.first_name}! Вы выбрали покупку.")
     print(f"Пользователь {user_id} нажал /buy")
 
 # Регистрируем команду
-dispatcher.add_handler(CommandHandler("buy", buy))
+application.add_handler(CommandHandler("buy", buy))
 
 # Вебхук
 @app.route("/webhook/<token>", methods=["POST"])
@@ -28,7 +26,7 @@ def webhook(token):
     if token != TOKEN:
         return "Unauthorized", 403
     update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    application.run_update(update)
     return "OK", 200
 
 if __name__ == "__main__":
