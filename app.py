@@ -1,9 +1,10 @@
 import os
+import asyncio
 from flask import Flask, request
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Переменные окружения
+# === Переменные окружения ===
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")
 RAILWAY_URL = os.getenv("RAILWAY_URL")  # например https://mybot.up.railway.app
@@ -15,7 +16,7 @@ bot = Bot(BOT_TOKEN)
 application = Application.builder().token(BOT_TOKEN).updater(None).build()
 app = Flask(__name__)
 
-# Команда /buy
+# === /buy команда ===
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     amount = 1
@@ -25,33 +26,32 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"&paymentType=SB&sum={amount}&label={user_id}"
     )
     await update.message.reply_text(
-        f"💳 Перейди по ссылке для оплаты:\n{pay_url}\n\nПосле подтверждения ЮMoney я сразу пришлю доступ ✅"
+        f"💳 Оплата: {pay_url}\n\nПосле подтверждения платежа бот автоматически пришлёт доступ ✅"
     )
 
 application.add_handler(CommandHandler("buy", buy))
 
-# Webhook endpoint (Telegram присылает апдейты сюда)
+# === Webhook endpoint (Telegram присылает апдейты) ===
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
     application.update_queue.put_nowait(update)
     return "OK", 200
 
-# Простая проверка
-@app.route("/", methods=["GET"])
-def home():
-    return "Бот работает ✅", 200
+# === ЮMoney /notify endpoint ===
+@app.route("/notify", methods=["POST"])
+def notify():
+    data = request.form  # ЮMoney присылает данные формы
+    label = data.get("label")  # это user_id, который мы передали в pay_url
+    status = data.get("status")  # usually "success"
+    
+    if status == "success" and label:
+        try:
+            user_id = int(label)
+            asyncio.run(send_access(user_id))
+        except Exception as e:
+            print(f"Ошибка при отправке доступа: {e}")
+    return "OK", 200
 
-# Установка webhook
-@app.before_first_request
-def setup_webhook():
-    import asyncio
-    async def inner():
-        await bot.delete_webhook()
-        await bot.set_webhook(url=f"{RAILWAY_URL}/webhook/{BOT_TOKEN}")
-        print(f"Webhook установлен: {RAILWAY_URL}/webhook/{BOT_TOKEN}")
-    asyncio.run(inner())
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+# === Функция отправки доступа пользователю ===
+async def send_access(user_id):
